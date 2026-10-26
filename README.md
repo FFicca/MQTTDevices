@@ -1,7 +1,7 @@
 # MQTTDevices
 SmartThings Edge driver for creating MQTT-connected devices.  These devices will update their states based on MQTT messages.  No cloud connection is used, so everything is executed locally.  
 
-Currently supported device types:  switch, battery, button, contact, motion, motionPlus, alarm, dimmer, vibration, lock, presence, sound, moisture, temperature, humidity, energy, text, numeric, robot vacuum, fanspeed.  More can be added - just ask!
+Currently supported device types:  switch, battery, button, contact, motion, motion-switch, motionPlus, alarm, dimmer, vibration, lock, presence, sound, moisture, temperature, humidity, energy, text, numeric, robot vacuum, fanspeed.  More can be added - just ask!
 
 Switch, button, alarm, dimmer, lock, temperature, humidity, energy, numeric, robot vacuum, and fanspeed devices can also be configured to publish MQTT messages when state changes from within SmartThings (i.e., manually via mobile app or automations).
 
@@ -109,3 +109,6 @@ Here is an example Rule for doing so:
 * Momentary button devices support 4 types of received messages: button pressed, double-push, triple-push, and button held
 * Values published: For Switch, the respective ON/OFF values configured in Settings are sent; for Button the button PRESSED value configured in Settings is sent
 * For the Numeric device, messages will only be published when the number value is updated in SmartThings, at which time both the number value and unit text will be included in the message; if using automations, it's recommended therefore that unit text be updated first, then the number value
+* Motion-Switch switch state no longer mirrors motion active/inactive events; it changes only from explicit switch payloads or local switch commands
+* Motion-Switch guardrails: if motion values and switch values overlap semantically, a warning is logged and ambiguous switch parsing is reduced
+* Motion-Switch optimistic protection: when subscribe and publish topics are the same, startup command-like retained payloads are ignored briefly and immediate local command echoes are suppressed to prevent false state flips

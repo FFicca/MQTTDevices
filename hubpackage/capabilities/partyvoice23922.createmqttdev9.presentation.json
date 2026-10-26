@@ -72,6 +72,11 @@
                             "type": "active"
                         },
                         {
+                            "key": "Motion-Switch",
+                            "value": "Motion-Switch",
+                            "type": "active"
+                        },
+                        {
                             "key": "MotionPlus",
                             "value": "MotionPlus",
                             "type": "active"
@@ -186,6 +191,11 @@
                         {
                             "key": "Motion",
                             "value": "Motion Sensor",
+                            "type": "active"
+                        },
+                        {
+                            "key": "Motion-Switch",
+                            "value": "Motion-Switch",
                             "type": "active"
                         },
                         {

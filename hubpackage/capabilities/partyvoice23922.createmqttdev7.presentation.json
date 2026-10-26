@@ -32,6 +32,11 @@
                             "type": "active"
                         },
                         {
+                            "key": "Motion-Switch",
+                            "value": "Motion-Switch",
+                            "type": "active"
+                        },
+                        {
                             "key": "CO2",
                             "value": "CO2 Measurement",
                             "type": "active"
@@ -136,6 +141,11 @@
                         {
                             "key": "Button",
                             "value": "Momentary Button",
+                            "type": "active"
+                        },
+                        {
+                            "key": "Motion-Switch",
+                            "value": "Motion-Switch",
                             "type": "active"
                         },
                         {

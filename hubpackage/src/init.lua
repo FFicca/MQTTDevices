@@ -1,4 +1,4 @@
---[[
+﻿--[[
   Copyright 2022, 2023 Todd Austin
 
   Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
@@ -34,6 +34,7 @@ local mqtt = require "mqtt"
 -- Global variables
 thisDriver = {}               -- used in the MQTT client module: TODO- pass it in at initialization
 SUBSCRIBED_TOPICS = {}        -- referenced by other modules
+SWITCH_TOPICS = {}            -- switch subscribe topics for Motion-Switch devices
 client = nil                  -- referenced by other modules
 client_reset_inprogress = false
 creator_device = {}           -- referenced by other modules
@@ -43,6 +44,7 @@ typemeta =  {
               ['Button']       = { ['profile'] = 'mqttbutton.v2',        ['created'] = 0, ['switch'] = false },
               ['Contact']      = { ['profile'] = 'mqttcontact.v2',       ['created'] = 0, ['switch'] = false },
               ['Motion']       = { ['profile'] = 'mqttmotion.v2',        ['created'] = 0, ['switch'] = false },
+              ['Motion-Switch']= { ['profile'] = 'mqttmotionswitch.v1',  ['created'] = 0, ['switch'] = true  },
               ['Alarm']        = { ['profile'] = 'mqttalarm.v2',         ['created'] = 0, ['switch'] = false },
               ['Dimmer']       = { ['profile'] = 'mqttdimmer.v3',        ['created'] = 0, ['switch'] = true },
               ['Acceleration'] = { ['profile'] = 'mqttaccel.v1',         ['created'] = 0, ['switch'] = false },
@@ -69,17 +71,19 @@ local initialized = false
 local clearcreatemsg_timer
 local shutdown_requested = false
 
-local MASTERPROFILE = 'mqttcreator.v9'
-local MASTERLABEL = 'MQTT Device Creator V1.9'
+local MASTERPROFILE = 'mqttcreator.v10'
+local MASTERLABEL = 'MQTT Device Creator V1.10'
 
-local CREATECAPID  = 'partyvoice23922.createmqttdev9'
-local CREATECAPID8  = 'partyvoice23922.createmqttdev8'
+local CREATECAPID  = 'dreamtiger65462.createmqttdev10'
+local CREATECAPID9 = 'partyvoice23922.createmqttdev9'
+local CREATECAPID8 = 'partyvoice23922.createmqttdev8'
 local CREATECAPID7 = 'partyvoice23922.createmqttdev7'
 local CREATECAPID6 = 'partyvoice23922.createmqttdev6'
 
 
 -- Custom Capabilities
 cap_createdev_latest = capabilities[CREATECAPID]
+cap_createdev_old9 = capabilities[CREATECAPID9]
 cap_createdev_old8 = capabilities[CREATECAPID8]
 cap_createdev_old7 = capabilities[CREATECAPID7]
 cap_createdev_old6 = capabilities[CREATECAPID6]
@@ -104,11 +108,34 @@ cap_reset = capabilities["partyvoice23922.resetselect"]
 
 local function schedule_subscribe()
 
-  if client then
+  if client and client.connection then
     sub.subscribe_all()
   else
     log.warn('Broker not yet connected')
     thisDriver:call_with_delay(2, schedule_subscribe)
+  end
+end
+
+
+local function schedule_device_subscribe(device, attempts_remaining)
+
+  if not device or device.device_network_id:find('Master', 1, 'plaintext') then
+    return
+  end
+
+  local subtopic = device.preferences and device.preferences.subTopic
+  if not subtopic or subtopic == 'xxxxx/xxxxx' then
+    return
+  end
+
+  if client and client.connection and sub.subscribe_topic(device) then
+    return
+  end
+
+  if attempts_remaining > 0 then
+    thisDriver:call_with_delay(2, function()
+      schedule_device_subscribe(device, attempts_remaining - 1)
+    end)
   end
 end
 
@@ -127,6 +154,7 @@ local function create_MQTT_client(device)
   end
 
   SUBSCRIBED_TOPICS = {}
+  SWITCH_TOPICS = {}
 
   -- create mqtt client
   client = mqtt.client(connect_args)
@@ -251,6 +279,11 @@ end
 local function device_init(driver, device)
 
   log.debug(device.id .. ": " .. device.device_network_id .. "> INITIALIZING")
+  log.debug(string.format('Device <%s> profile=%s manufacturer=%s model=%s',
+            device.label,
+            tostring(device.profile and device.profile.name),
+            tostring(device.manufacturer_info and device.manufacturer_info.manufacturer),
+            tostring(device.manufacturer_info and device.manufacturer_info.model)))
   
   if device.device_network_id:find('Master', 1, 'plaintext') then
   
@@ -258,6 +291,8 @@ local function device_init(driver, device)
     
     if device:supports_capability_by_id(CREATECAPID) then
       cap_createdev = cap_createdev_latest
+    elseif device:supports_capability_by_id(CREATECAPID9) then
+      cap_createdev = cap_createdev_old9
     elseif device:supports_capability_by_id(CREATECAPID8) then
       cap_createdev = cap_createdev_old8
     elseif device:supports_capability_by_id(CREATECAPID7) then
@@ -276,6 +311,7 @@ local function device_init(driver, device)
 
   else
     device:emit_event(cap_status.status('Not Subscribed'))
+    schedule_device_subscribe(device, 10)
   end
   
 end
@@ -290,11 +326,13 @@ local function device_added (driver, device)
 
     local dtype = device.device_network_id:match('MQTT_(.+)_+')
 
-    if (dtype == 'Motion') or (dtype == 'MotionPlus') then
+    if (dtype == 'Motion') or (dtype == 'MotionPlus') or (dtype == 'Motion-Switch') then
       device:emit_event(capabilities.motionSensor.motion('inactive'))
     end
     
     if dtype == 'Switch' then
+      device:emit_event(capabilities.switch.switch('off'))
+    elseif dtype == 'Motion-Switch' then
       device:emit_event(capabilities.switch.switch('off'))
     elseif dtype == 'Dimmer' then
       device:emit_event(capabilities.switchLevel.level(0))
@@ -411,6 +449,12 @@ local function handler_driverchanged(driver, device, event, args)
 
   log.debug ('*** Driver changed handler invoked ***')
 
+  if device.device_network_id:find('Master', 1, 'plaintext') then
+    creator_device = device
+    device:emit_event(cap_status.status('Reconnecting...'))
+    init_mqtt(device)
+  end
+
 end
 
 
@@ -444,6 +488,16 @@ local function handler_infochanged (driver, device, event, args)
   -- Did preferences change?
   if args.old_st_store.preferences then
 
+    local dtype = device.device_network_id:match('MQTT_(.+)_+')
+
+    if dtype == 'Motion-Switch' and device.preferences.publish == true then
+      local subtopic = tostring(device.preferences.subTopic or '')
+      local pubtopic = tostring(device.preferences.pubtopic or '')
+      if subtopic ~= '' and pubtopic ~= '' and subtopic == pubtopic then
+        log.warn(string.format('Motion-Switch <%s> uses identical subscribe and publish topic <%s>; enabling optimistic mirror behavior can replay retained command values on startup', device.label, subtopic))
+      end
+    end
+
     local reset_connection = false
     local ip_changed = false
     local uname_changed = false
@@ -456,9 +510,13 @@ local function handler_infochanged (driver, device, event, args)
         sub.unsubscribe(id, topic)
         device:emit_event(cap_status.status('Un-Subscribed'))
       end
-      
       sub.subscribe_topic(device)
-      
+      sub.subscribe_switch_topic(device)
+
+    elseif args.old_st_store.preferences.switchSubTopic ~= device.preferences.switchSubTopic then
+      log.info ('Switch Subscribe Topic changed to: ', device.preferences.switchSubTopic)
+      sub.mqtt_subscribe(device)
+
     elseif args.old_st_store.preferences.userid ~= device.preferences.userid then
       uname_changed = true
     elseif args.old_st_store.preferences.password ~= device.preferences.password then
@@ -530,6 +588,12 @@ thisDriver = Driver("MQTT Devices", {
   capability_handlers = {
     [cap_createdev_latest.ID] = {
       [cap_createdev_latest.commands.setDeviceType.NAME] = cmd.handle_createdevice,
+    },
+    [cap_createdev_old9.ID] = {
+      [cap_createdev_old9.commands.setDeviceType.NAME] = cmd.handle_createdevice,
+    },
+    [cap_createdev_old8.ID] = {
+      [cap_createdev_old8.commands.setDeviceType.NAME] = cmd.handle_createdevice,
     },
     [cap_createdev_old7.ID] = {
       [cap_createdev_old7.commands.setDeviceType.NAME] = cmd.handle_createdevice,
@@ -610,6 +674,6 @@ thisDriver = Driver("MQTT Devices", {
   }
 })
 
-log.info ('MQTT Device Driver V1.8 Started')
+log.info ('MQTT Device Driver V1.10f Started')
 
 thisDriver:run()

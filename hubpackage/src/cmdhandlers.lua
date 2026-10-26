@@ -39,6 +39,11 @@ local function publish_message(device, payload, opt_topic, opt_qos)
       payload = payload,
       qos = tonumber(pubqos)
     })
+
+    -- Track publish metadata so message processing can ignore command echo loops.
+    device:set_field('mqtt_last_published_topic', pubtopic)
+    device:set_field('mqtt_last_published_payload', tostring(payload))
+    device:set_field('mqtt_last_published_ts', socket.gettime())
     
     log.debug (string.format('Message "%s" published to topic %s with qos=%d', payload, pubtopic, tonumber(pubqos)))
     
@@ -112,7 +117,7 @@ local function handle_switch(driver, device, command)
 
   local dtype = device.device_network_id:match('MQTT_(.+)_+')
   
-  if dtype == 'Switch' and device.preferences.publish == true then
+  if (dtype == 'Switch' or dtype == 'Motion-Switch') and device.preferences.publish == true then
       
     local cmdmap = {
                       ['on'] = device.preferences.switchon,

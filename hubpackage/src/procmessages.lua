@@ -22,8 +22,72 @@ local log = require "log"
 local capabilities = require "st.capabilities"
 local json = require "dkjson"
 local stutils = require "st.utils"
+local socket = require "cosock.socket"
 
 local sub = require "subscriptions"
+
+local function normalize_value(value)
+  return tostring(value or ''):lower():gsub('^%s*(.-)%s*$', '%1')
+end
+
+local function warn_once(device, field_name, message)
+  if device:get_field(field_name) ~= true then
+    device:set_field(field_name, true)
+    log.warn(message)
+  end
+end
+
+local function motion_switch_guardrails(device, topic, value, norm_value)
+  local pref_motion_active = normalize_value(device.preferences.motionactive)
+  local pref_motion_inactive = normalize_value(device.preferences.motioninactive)
+  local pref_switch_on = normalize_value(device.preferences.switchon)
+  local pref_switch_off = normalize_value(device.preferences.switchoff)
+
+  if (pref_motion_active == pref_switch_on and pref_motion_active ~= '') or
+     (pref_motion_inactive == pref_switch_off and pref_motion_inactive ~= '') then
+    warn_once(
+      device,
+      'mqtt_warned_motion_switch_overlap',
+      string.format('Motion-Switch <%s> has overlapping motion and switch payload preferences; separate state vocabularies to avoid ambiguous updates', device.label)
+    )
+  end
+
+  local now = socket.gettime()
+  local raw_sub_ts = device:get_field('mqtt_last_subscribe_ts')
+  local raw_last_pub_ts = device:get_field('mqtt_last_published_ts')
+  local sub_ts = raw_sub_ts and tonumber(raw_sub_ts) or nil
+  local last_pub_ts = raw_last_pub_ts and tonumber(raw_last_pub_ts) or nil
+  local last_pub_topic = tostring(device:get_field('mqtt_last_published_topic') or '')
+  local last_pub_payload = normalize_value(device:get_field('mqtt_last_published_payload'))
+
+  local subtopic = tostring(device.preferences.subTopic or '')
+  local pubtopic = tostring(device.preferences.pubtopic or '')
+  local same_topic = (subtopic ~= '' and pubtopic ~= '' and subtopic == pubtopic and topic == subtopic)
+  local switch_payload = (norm_value == pref_switch_on) or (norm_value == pref_switch_off) or
+                         (norm_value == 'on') or (norm_value == 'off') or
+                         (norm_value == 'enable') or (norm_value == 'enabled') or
+                         (norm_value == 'disable') or (norm_value == 'disabled')
+
+  if same_topic and switch_payload and sub_ts and ((now - sub_ts) <= 8) then
+    warn_once(
+      device,
+      'mqtt_warned_optimistic_retained',
+      string.format('Motion-Switch <%s> ignored switch-like payload from same command/state topic during startup window; likely retained command replay', device.label)
+    )
+    return true
+  end
+
+  if same_topic and switch_payload and last_pub_ts and last_pub_topic == topic and last_pub_payload == norm_value and ((now - last_pub_ts) <= 2) then
+    log.debug(string.format('Motion-Switch <%s> ignored local command echo payload on topic %s', device.label, topic))
+    return true
+  end
+
+  if (norm_value == pref_motion_active) or (norm_value == pref_motion_inactive) then
+    return true
+  end
+
+  return false
+end
 
 
 local function is_array(t)
@@ -152,14 +216,47 @@ local function process_message(topic, msg)
       end
 
       if value ~= nil then
-        
-        if (dtype == 'Motion') or (dtype == 'MotionPlus') then
+
+        local norm_value = normalize_value(value)
+
+        -- Determine if this message arrived on the dedicated switch topic (not the motion topic)
+        local on_switch_topic = (dtype == 'Motion-Switch') and
+                                (device.preferences.switchSubTopic ~= nil) and
+                                (device.preferences.switchSubTopic ~= 'xxxxx/xxxxx') and
+                                (topic == device.preferences.switchSubTopic)
+
+        if (dtype == 'Motion') or (dtype == 'MotionPlus') or (dtype == 'Motion-Switch' and not on_switch_topic) then
           if value == device.preferences.motionactive then
             device:emit_event(capabilities.motionSensor.motion.active())
           elseif value == device.preferences.motioninactive then
             device:emit_event(capabilities.motionSensor.motion.inactive())
           else
-            log.warn ('Unconfigured motion value received')
+            if dtype ~= 'Motion-Switch' then
+              log.warn ('Unconfigured motion value received')
+            end
+          end
+        end
+
+        if dtype == 'Motion-Switch' then
+          local pref_switch_on = normalize_value(device.preferences.switchon)
+          local pref_switch_off = normalize_value(device.preferences.switchoff)
+
+          if motion_switch_guardrails(device, topic, value, norm_value) then
+            pref_switch_on = nil
+          end
+
+          if pref_switch_on and ((value == device.preferences.switchon) or
+             (norm_value == pref_switch_on) or
+             (norm_value == 'on') or
+             (norm_value == 'enable') or
+             (norm_value == 'enabled')) then
+            device:emit_event(capabilities.switch.switch.on())
+          elseif pref_switch_on and ((value == device.preferences.switchoff) or
+                 (norm_value == pref_switch_off) or
+                 (norm_value == 'off') or
+                 (norm_value == 'disable') or
+                 (norm_value == 'disabled')) then
+            device:emit_event(capabilities.switch.switch.off())
           end
         end
 

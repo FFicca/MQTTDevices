@@ -1,0 +1,109 @@
+name: mqttmotionswitch.v1
+components:
+  - id: main
+    capabilities:
+      - id: motionSensor
+        version: 1
+      - id: switch
+        version: 1
+      - id: partyvoice23922.status
+        version: 1
+      - id: partyvoice23922.refresh
+        version: 1
+    categories:
+      - name: MotionSensor
+metadata:
+  ocfDeviceType: x.com.st.d.sensor.motion
+preferences:
+  - title: "Subscribe Topic"
+    name: subTopic
+    description: "Topic Name"
+    required: true
+    preferenceType: string
+    definition:
+      stringType: text
+      default: "xxxxx/xxxxx"
+  - title: "Expected Message Format"
+    name: format
+    description: "Select type"
+    required: true
+    preferenceType: enumeration
+    definition:
+      options:
+        json: "JSON"
+        string: "String"
+      default: string
+  - title: "JSON Key"
+    name: jsonelement
+    description: "Data element"
+    required: true
+    preferenceType: string
+    definition:
+      stringType: text
+      default: "Motion.Action"
+  - title: "Motion ACTIVE Value"
+    name: motionactive
+    description: "Msg value for ACTIVE"
+    required: true
+    preferenceType: string
+    definition:
+      stringType: text
+      default: "active"
+  - title: "Motion INACTIVE Value"
+    name: motioninactive
+    description: "Msg value for INACTIVE"
+    required: true
+    preferenceType: string
+    definition:
+      stringType: text
+      default: "inactive"
+  - title: "Switch Subscribe Topic"
+    name: switchSubTopic
+    description: "Topic for switch state (leave default to use subTopic)"
+    required: false
+    preferenceType: string
+    definition:
+      stringType: text
+      default: "xxxxx/xxxxx"
+  - title: "Publish Switch Commands"
+    name: publish
+    description: "Enable/Disable"
+    required: true
+    preferenceType: boolean
+    definition:
+      default: true
+  - title: "Publish Topic"
+    name: pubtopic
+    description: "Topic String"
+    required: true
+    preferenceType: string
+    definition:
+      stringType: text
+      default: "xxxxx/xxxxx"
+  - title: "Publish QoS"
+    name: qos
+    description: "Quality of Service"
+    required: true
+    preferenceType: enumeration
+    definition:
+      options:
+        qos0: "0"
+        qos1: "1"
+        qos2: "2"
+      default: qos1
+  - title: "Switch ON Publish Value"
+    name: switchon
+    description: "Command value for ON"
+    required: true
+    preferenceType: string
+    definition:
+      stringType: text
+      default: "on"
+  - title: "Switch OFF Publish Value"
+    name: switchoff
+    description: "Command value for OFF"
+    required: true
+    preferenceType: string
+    definition:
+      stringType: text
+      default: "off"
